@@ -12,9 +12,26 @@ type Page struct {
 	Body  []byte
 }
 
+type PageInterface interface {
+	save() error
+	addLinks(string)
+}
+
 func (p *Page) save() error {
-	filename := p.Title + ".txt"
+	filename := "data/" + p.Title + ".txt"
 	return ioutil.WriteFile(filename, p.Body, 0600)
+}
+
+func (p *Page) addLinks(keyword string) {
+	re := regexp.MustCompile(keyword)
+	repl := []byte(`<a href="/view/` + keyword + `">` + keyword + `</a>`)
+	after := re.ReplaceAll(p.Body, repl)
+	p.Body = after
+}
+
+func addLinksToPage(p PageInterface, keyword string) error {
+	p.addLinks(keyword)
+	return p.save()
 }
 
 func loadPage(title string) (*Page, error) {
@@ -24,6 +41,14 @@ func loadPage(title string) (*Page, error) {
 		return nil, err
 	}
 	return &Page{Title: title, Body: body}, nil
+}
+
+func defaultHandler(w http.ResponseWriter, r *http.Request) {
+	err := templates.ExecuteTemplate(w, "index.html", nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
@@ -54,7 +79,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
 	http.Redirect(w, r, "/view/"+title, http.StatusFound)
 }
 
-var templates = template.Must(template.ParseFiles("edit.html", "view.html"))
+var templates = template.Must(template.ParseFiles("tmpl/edit.html", "tmpl/view.html", "index.html"))
 
 func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
@@ -81,5 +106,6 @@ func main() {
 	http.HandleFunc("/view/", makeHandler(viewHandler))
 	http.HandleFunc("/edit/", makeHandler(editHandler))
 	http.HandleFunc("/save/", makeHandler(saveHandler))
+	http.HandleFunc("/", defaultHandler)
 	http.ListenAndServe(":8080", nil)
 }
