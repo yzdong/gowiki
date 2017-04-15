@@ -2,10 +2,19 @@ package main
 
 import (
 	"html/template"
+	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
 	"regexp"
 )
+
+var Error *log.Logger
+
+func Init(errorHandle io.Writer) {
+	Error = log.New(errorHandle, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
+}
 
 type Page struct {
 	Title string
@@ -29,9 +38,24 @@ func (p *Page) addLinks(keyword string) {
 	p.Body = after
 }
 
-func addLinksToPage(p PageInterface, keyword string) error {
-	p.addLinks(keyword)
-	return p.save()
+type Pages struct {
+	All []PageInterface
+}
+
+type PagesInterface interface {
+	addLinksToPages(string) []error
+}
+
+func (ps *Pages) addLinksToPages(keyword string) []error {
+	errs := make([]error, 0, len(ps.All))
+	for _, value := range ps.All {
+		value.addLinks(keyword)
+		err := value.save()
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
 func loadPage(title string) (*Page, error) {
@@ -51,7 +75,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
+func viewHandler(w http.ResponseWriter, r *http.Request, title string, pages PagesInterface) {
 	p, err := loadPage(title)
 	if err != nil {
 		http.Redirect(w, r, "/edit/"+title, http.StatusFound)
@@ -60,7 +84,7 @@ func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
 	renderTemplate(w, "view", p)
 }
 
-func editHandler(w http.ResponseWriter, r *http.Request, title string) {
+func editHandler(w http.ResponseWriter, r *http.Request, title string, pages PagesInterface) {
 	p, err := loadPage(title)
 	if err != nil {
 		p = &Page{Title: title}
@@ -68,13 +92,19 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	renderTemplate(w, "edit", p)
 }
 
-func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
+func saveHandler(w http.ResponseWriter, r *http.Request, title string, pages PagesInterface) {
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
 	err := p.save()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	errs := pages.addLinksToPages(title)
+	if len(errs) != 0 {
+		for _, val := range errs {
+			Error.Println(val.Error())
+		}
 	}
 	http.Redirect(w, r, "/view/"+title, http.StatusFound)
 }
@@ -91,21 +121,23 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 
 var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-0]+)$")
 
-func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+func makeHandler(fn func(http.ResponseWriter, *http.Request, string, PagesInterface), ps PagesInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		m := validPath.FindStringSubmatch(r.URL.Path)
 		if m == nil {
 			http.NotFound(w, r)
 			return
 		}
-		fn(w, r, m[2])
+		fn(w, r, m[2], ps)
 	}
 }
 
 func main() {
-	http.HandleFunc("/view/", makeHandler(viewHandler))
-	http.HandleFunc("/edit/", makeHandler(editHandler))
-	http.HandleFunc("/save/", makeHandler(saveHandler))
+	Init(os.Stderr)
+	pages := &Pages{All: make([]PageInterface, 0, 10)}
+	http.HandleFunc("/view/", makeHandler(viewHandler, pages))
+	http.HandleFunc("/edit/", makeHandler(editHandler, pages))
+	http.HandleFunc("/save/", makeHandler(saveHandler, pages))
 	http.HandleFunc("/", defaultHandler)
 	http.ListenAndServe(":8080", nil)
 }
