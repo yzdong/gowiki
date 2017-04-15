@@ -60,7 +60,7 @@ func (ps *Pages) addLinksToPages(keyword string) []error {
 
 func loadPage(title string) (*Page, error) {
 	filename := title + ".txt"
-	body, err := ioutil.ReadFile(filename)
+	body, err := ioutil.ReadFile("data/" + filename)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,15 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 	}
 }
 
-var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-0]+)$")
+func initPages(dir string) *Pages {
+	pages := &Pages{All: make([]PageInterface, 0, 10)}
+	files, _ := ioutil.ReadDir(dir)
+	for _, val := range files {
+		page, _ := loadPage(val.Name())
+		pages.All = append(pages.All, page)
+	}
+	return pages
+}
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, string, PagesInterface), ps PagesInterface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -132,9 +140,11 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, string, PagesInterf
 	}
 }
 
+var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-0]+)$")
+
 func main() {
 	Init(os.Stderr)
-	pages := &Pages{All: make([]PageInterface, 0, 10)}
+	pages := initPages("data/")
 	http.HandleFunc("/view/", makeHandler(viewHandler, pages))
 	http.HandleFunc("/edit/", makeHandler(editHandler, pages))
 	http.HandleFunc("/save/", makeHandler(saveHandler, pages))
