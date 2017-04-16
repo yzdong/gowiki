@@ -32,7 +32,7 @@ func (p *Page) save() error {
 }
 
 func (p *Page) addLinks(keyword string) {
-	re := regexp.MustCompile(keyword)
+	re := regexp.MustCompile(`[^>^/]` + keyword + `[^<^"]`)
 	repl := []byte(`<a href="/view/` + keyword + `">` + keyword + `</a>`)
 	after := re.ReplaceAll(p.Body, repl)
 	p.Body = after
@@ -111,8 +111,14 @@ func saveHandler(w http.ResponseWriter, r *http.Request, title string, pages Pag
 
 var templates = template.Must(template.ParseFiles("tmpl/edit.html", "tmpl/view.html", "index.html"))
 
+type EscapedPage struct {
+	Title string
+	Body  template.HTML
+}
+
 func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
-	err := templates.ExecuteTemplate(w, tmpl+".html", p)
+	ep := &EscapedPage{Title: p.Title, Body: template.HTML(p.Body)}
+	err := templates.ExecuteTemplate(w, tmpl+".html", ep)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -120,10 +126,12 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 }
 
 func initPages(dir string) *Pages {
+	re := regexp.MustCompile(".txt")
 	pages := &Pages{All: make([]PageInterface, 0, 10)}
 	files, _ := ioutil.ReadDir(dir)
 	for _, val := range files {
-		page, _ := loadPage(val.Name())
+		title := re.ReplaceAllString(val.Name(), "")
+		page, _ := loadPage(title)
 		pages.All = append(pages.All, page)
 	}
 	return pages
