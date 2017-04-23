@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"html/template"
 	"io"
 	"io/ioutil"
@@ -11,28 +12,31 @@ import (
 )
 
 var Error *log.Logger
+var dataDirName = "data"
 
 func Init(errorHandle io.Writer) {
 	Error = log.New(errorHandle, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
 }
 
 type Page struct {
-	Title string
-	Body  []byte
+	Title    string
+	Location string
+	Body     []byte
 }
 
 type PageInterface interface {
-	save() error
+	save(string) error
 	addLinks(string)
 }
 
-func (p *Page) save() error {
-	filename := "data/" + p.Title + ".txt"
+func (p *Page) save(s string) error {
+	filename := s + "/" + p.Title + ".txt"
 	return ioutil.WriteFile(filename, p.Body, 0600)
 }
 
 func (p *Page) addLinks(keyword string) {
-	re := regexp.MustCompile(`[^>^/]` + keyword + `[^<^"]`)
+	pattern := fmt.Sprintf("[^>/]%s[^<>]|^%s$", keyword, keyword)
+	re := regexp.MustCompile(pattern)
 	repl := []byte(`<a href="/view/` + keyword + `">` + keyword + `</a>`)
 	after := re.ReplaceAll(p.Body, repl)
 	p.Body = after
@@ -50,7 +54,7 @@ func (ps *Pages) addLinksToPages(keyword string) []error {
 	errs := make([]error, 0, len(ps.All))
 	for _, value := range ps.All {
 		value.addLinks(keyword)
-		err := value.save()
+		err := value.save(dataDirName)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -59,12 +63,12 @@ func (ps *Pages) addLinksToPages(keyword string) []error {
 }
 
 func loadPage(title string) (*Page, error) {
-	filename := title + ".txt"
-	body, err := ioutil.ReadFile("data/" + filename)
+	filename := dataDirName + "/" + title + ".txt"
+	body, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
-	return &Page{Title: title, Body: body}, nil
+	return &Page{Title: title, Location: filename, Body: body}, nil
 }
 
 func defaultHandler(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +99,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string, pages Pag
 func saveHandler(w http.ResponseWriter, r *http.Request, title string, pages PagesInterface) {
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
-	err := p.save()
+	err := p.save(dataDirName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -152,7 +156,7 @@ var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-0]+)$")
 
 func main() {
 	Init(os.Stderr)
-	pages := initPages("data/")
+	pages := initPages(dataDirName)
 	http.HandleFunc("/view/", makeHandler(viewHandler, pages))
 	http.HandleFunc("/edit/", makeHandler(editHandler, pages))
 	http.HandleFunc("/save/", makeHandler(saveHandler, pages))
