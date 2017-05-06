@@ -25,21 +25,9 @@ type Page struct {
 }
 
 type PageInterface interface {
-	save(string) error
-	addLinks(string)
-}
-
-func (p *Page) save(s string) error {
-	filename := s + "/" + p.Title + ".txt"
-	return ioutil.WriteFile(filename, p.Body, 0600)
-}
-
-func (p *Page) addLinks(keyword string) {
-	pattern := fmt.Sprintf("[^>/]%s[^<>]|^%s$", keyword, keyword)
-	re := regexp.MustCompile(pattern)
-	repl := []byte(`<a href="/view/` + keyword + `">` + keyword + `</a>`)
-	after := re.ReplaceAll(p.Body, repl)
-	p.Body = after
+	save() error
+	addLinks(string) error
+	getTitle() string
 }
 
 type Pages struct {
@@ -48,18 +36,50 @@ type Pages struct {
 
 type PagesInterface interface {
 	addLinksToPages(string) []error
+	updatePage(*Page)
+}
+
+func (p *Page) save() error {
+	return ioutil.WriteFile(p.Location, p.Body, 0600)
+}
+
+func (p *Page) addLinks(keyword string) error {
+	pattern := fmt.Sprintf("[^>/]%s[^<>]|^%s$", keyword, keyword)
+	re := regexp.MustCompile(pattern)
+	repl := []byte(`<a href="/view/` + keyword + `">` + keyword + `</a>`)
+	body, err := ioutil.ReadFile(p.Location)
+	if err != nil {
+		return err
+	}
+	p.Body = body
+	after := re.ReplaceAll(p.Body, repl)
+	p.Body = after
+	return nil
+}
+
+func (p *Page) getTitle() string {
+	return p.Title
 }
 
 func (ps *Pages) addLinksToPages(keyword string) []error {
 	errs := make([]error, 0, len(ps.All))
 	for _, value := range ps.All {
 		value.addLinks(keyword)
-		err := value.save(dataDirName)
+		err := value.save()
 		if err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errs
+}
+
+func (ps *Pages) updatePage(p *Page) {
+	for i, pg := range ps.All {
+		if pg.getTitle() == p.Title {
+			ps.All[i] = p
+		}
+	}
+	//update page in Pages
 }
 
 func loadPage(title string) (*Page, error) {
@@ -98,12 +118,14 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string, pages Pag
 
 func saveHandler(w http.ResponseWriter, r *http.Request, title string, pages PagesInterface) {
 	body := r.FormValue("body")
-	p := &Page{Title: title, Body: []byte(body)}
-	err := p.save(dataDirName)
+	filename := dataDirName + "/" + title + ".txt"
+	p := &Page{Title: title, Body: []byte(body), Location: filename}
+	err := p.save()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	pages.updatePage(p)
 	errs := pages.addLinksToPages(title)
 	if len(errs) != 0 {
 		for _, val := range errs {
